@@ -403,7 +403,9 @@
                         
                         // Update prediction display
                         document.getElementById('prediction').textContent = predictionLabel;
-                        document.getElementById('failure-description').textContent = failureInfo.description;
+                        document.getElementById('failure-description').textContent = data.tool_wear_alert
+                            ? 'Precautionary alert: tool wear is in the risky zone (200+ min). Plan a tool change.'
+                            : failureInfo.description;
                         document.getElementById('status-badge').className = `badge rounded-pill ${failureInfo.badgeClass}`;
                         document.getElementById('status-badge').textContent = predictionLabel;
                         
@@ -424,7 +426,9 @@
                             const failureConfidence = Math.round((probability) * 100);
                             document.getElementById('stability-confidence').textContent = `${failureConfidence}% Stable`;
                             document.getElementById('stability-description').textContent = 
-                                `${getConfidenceLevel(failureConfidence)} `;
+                                data.tool_wear_alert
+                                    ? 'Model sees normal operation; this alert comes from the tool-wear rule'
+                                    : `${getConfidenceLevel(failureConfidence)} `;
                             
                             // Update progress bar (red/orange for failure confidence)
                             const stabilityBar = document.getElementById('stability-bar');

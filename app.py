@@ -1,77 +1,69 @@
-from flask import Flask, render_template, request, jsonify
+import os
+
 import joblib
 import numpy as np
-import os
+import pandas as pd
+from flask import Flask, render_template, request, jsonify
+
+from features import add_derived
 
 app = Flask(__name__)
 
-# Load the trained model and label encoder
-model = None
-label_encoder = None
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          'equipment_failure_Prediction', 'model_final.pkl')
+
+# Bundle produced by train_final.py: ensemble of models, per-class weights,
+# class names and the tool-wear alert threshold.
+bundle = None
 try:
-    model = joblib.load('equipment_failure/random_forest_model.pkl')
-    label_encoder = joblib.load('equipment_failure/label_encoder.pkl')
-except:
-    print("Model files not found. Please train the model first.")
+    bundle = joblib.load(MODEL_PATH)
+except Exception as e:
+    print(f"Model not found at {MODEL_PATH} ({e}). Run train_final.py first.")
+
 
 @app.route('/')
 def home():
     return render_template('index1.html')
 
+
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
-        # Get values from the form
-        type_val = int(request.form['type'])
-        air_temp = float(request.form['air_temperature'])
-        process_temp = float(request.form['process_temperature'])
-        rotational_speed = float(request.form['rotational_speed'])
-        torque = float(request.form['torque'])
-        tool_wear = float(request.form['tool_wear'])
-        
-        # Calculate implicit features (example calculations - adjust as needed)
-        # Feature 1: Temperature difference (process - air)
-        temp_difference = process_temp - air_temp
-        
-        # Feature 2: Power (rotational speed * torque)
-        power = rotational_speed * torque
-        
-        # Create features list with all 8 features in correct order
-        features = [
-            type_val,
-            air_temp,
-            process_temp,
-            rotational_speed,
-            torque,
-            tool_wear,
-            temp_difference,  # First implicit feature
-            power             # Second implicit feature
-        ]
-        
-        # Make prediction
-        if model is not None and label_encoder is not None:
-            prediction = model.predict([features])[0]
-            probability = model.predict_proba([features])[0][1]  # Probability of failure
-            
-            # Convert numeric prediction back to label
-            prediction_label = label_encoder.inverse_transform([prediction])[0]
-            
-            return jsonify({
-                'prediction': prediction_label,
-                'probability': float(probability),
-                'status': 'success'
-            })
-        else:
-            return jsonify({
-                'error': 'Model not loaded',
-                'status': 'error'
-            })
-            
-    except Exception as e:
+        if bundle is None:
+            return jsonify({'error': 'Model not loaded', 'status': 'error'})
+
+        row = pd.DataFrame([{
+            'Type': int(request.form['type']),
+            'Air temperature [K]': float(request.form['air_temperature']),
+            'Process temperature [K]': float(request.form['process_temperature']),
+            'Rotational speed [rpm]': float(request.form['rotational_speed']),
+            'Torque [Nm]': float(request.form['torque']),
+            'Tool wear [min]': float(request.form['tool_wear']),
+        }])
+        X = add_derived(row)[bundle['features']]
+
+        classes = bundle['classes']
+        proba = np.mean([m.predict_proba(X)[0] for m in bundle['models'].values()], axis=0)
+        pred = int(np.argmax(proba * bundle['weights']))
+
+        # Tool-wear alert: model says "No Failure" but the tool is in the risky wear zone.
+        alert = False
+        if classes[pred] == 'No Failure' and X['wear'].iloc[0] >= bundle['wear_alert']:
+            pred = classes.index('Tool Wear Failure')
+            alert = True
+
         return jsonify({
-            'error': str(e),
-            'status': 'error'
+            'prediction': classes[pred],
+            # P(No Failure): the UI shows it as "stability"
+            'probability': float(proba[classes.index('No Failure')]),
+            'probabilities': {c: float(p) for c, p in zip(classes, proba)},
+            'tool_wear_alert': alert,
+            'status': 'success'
         })
 
+    except Exception as e:
+        return jsonify({'error': str(e), 'status': 'error'})
+
+
 if __name__ == '__main__':
-    app.run(debug=True) 
+    app.run(debug=True)
