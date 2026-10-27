@@ -1,7 +1,7 @@
 """Retrain the equipment failure model with class-imbalance handling.
 
 Strategies compared (resampling is applied to the TRAIN split only; the test
-split is never touched, so the metrics stay honest):
+split is never touched, so the metrics stay reliable):
   baseline         RandomForest + class_weight='balanced' (original notebook)
   oversample_ros   random oversampling of minority classes
   oversample_smote SMOTE oversampling of minority classes
